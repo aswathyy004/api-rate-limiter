@@ -13,31 +13,36 @@ public class FixedWindowCounter implements RateLimiter {
     public FixedWindowCounter(int limit, long windowSizeInMillis) {
         this.limit = limit;
         this.windowSizeInMillis = windowSizeInMillis;
-
-        // Track when the current time window started
         this.windowStart = new AtomicLong(System.currentTimeMillis());
-        // Track how many requests happened in this window
         this.counter = new AtomicInteger(0);
     }
 
     @Override
-    public boolean tryConsume() {
+    public RateLimitResult tryConsume() {
         long now = System.currentTimeMillis();
-        // Math trick: round down the current time to the nearest window boundary
         long currentWindow = (now / windowSizeInMillis) * windowSizeInMillis;
 
-        // If time has passed into a NEW window, we must reset the counter
+        // Check if we moved to a new time window
         if (windowStart.get() != currentWindow) {
-            // synchronized ensures multiple threads don't reset it at the exact same millisecond
             synchronized (this) {
                 if (windowStart.get() != currentWindow) {
                     windowStart.set(currentWindow);
-                    counter.set(0); // Reset tokens back to 0!
+                    counter.set(0);
                 }
             }
         }
 
-        // Increment the counter. If it's less than or equal to the limit, allow!
-        return counter.incrementAndGet() <= limit;
+        int currentCount = counter.incrementAndGet();
+
+        // Calculate remaining tokens (prevent negative numbers)
+        long remaining = Math.max(0, limit - currentCount);
+
+        if (currentCount <= limit) {
+            // Allowed! Return true + remaining count
+            return new RateLimitResult(true, remaining);
+        } else {
+            // Blocked! Return false + 0 remaining
+            return new RateLimitResult(false, 0);
+        }
     }
 }
